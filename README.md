@@ -133,10 +133,3 @@ MIT License
 
 ```
 
----
-
-This README clearly explains:  
-- Which script to use for **inline MR suggestions** (`postMR.js`)  
-- Which script to use for **QA suggestions + Jira update + MR merge** (`mergeMR.js`)  
-- Environment setup, workflow, and prerequisites for both scripts.  
-```
