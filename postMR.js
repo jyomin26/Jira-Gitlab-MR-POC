@@ -6,6 +6,7 @@ const {
   GITLAB_PROJECT_ID,
   GITLAB_API_URL,
   GITLAB_TOKEN,
+  GITLAB_AI_TOKEN,
   GITLAB_BRANCH_NAME,
   JIRA_BASE_URL,
   JIRA_EMAIL,
@@ -17,6 +18,11 @@ const {
 const gitlabApi = axios.create({
   baseURL: GITLAB_API_URL,
   headers: { "PRIVATE-TOKEN": GITLAB_TOKEN }
+});
+
+const gitlabAIAgentApi = axios.create({
+  baseURL: GITLAB_API_URL,
+  headers: { "PRIVATE-TOKEN": GITLAB_AI_TOKEN }
 });
 
 // ---------------- Helpers ----------------
@@ -130,14 +136,14 @@ Return JSON ONLY:
 }
 
 // ---------------- Add inline suggestion ----------------
-async function addInlineSuggestion(mr, suggestion, changes) {
+async function addInlineSuggestionAsAIAgent(mr, suggestion, changes) {
   const { diff_refs } = mr;
   if (!diff_refs) return;
   const fileDiff = changes.find(c => c.new_path === suggestion.file);
   if (!fileDiff) return;
 
   try {
-    await gitlabApi.post(`/projects/${GITLAB_PROJECT_ID}/merge_requests/${mr.iid}/discussions`, {
+    await gitlabAIAgentApi.post(`/projects/${GITLAB_PROJECT_ID}/merge_requests/${mr.iid}/discussions`, {
       body: `\`\`\`suggestion\n${suggestion.suggestion}\n\`\`\`\n**Note:** ${suggestion.note}`,
       position: {
         base_sha: diff_refs.base_sha,
@@ -198,8 +204,7 @@ async function run() {
 
     // Gemini review + Jira compliance suggestions
     const suggestions = await getReviewSuggestions(changes, jiraDescriptions);
-    for (const s of suggestions) await addInlineSuggestion(mr, s, changes);
-
+    for (const s of suggestions) await addInlineSuggestionAsAIAgent(mr, s, changes);
     console.log("✅ Gemini + Jira compliance suggestions posted inline");
   } catch (err) {
     console.error("❌ Fatal error:", err);

@@ -12,7 +12,10 @@ const {
   JIRA_BASE_URL,
   JIRA_EMAIL,
   JIRA_API_TOKEN,
-  JIRA_QA_EMAIL
+  JIRA_QA_EMAIL,
+  JIRA_AI_AGENT_EMAIL,
+  JIRA_AI_AGENT_TOKEN
+
 } = process.env;
 
 // ---------------- Axios Instances ----------------
@@ -23,7 +26,7 @@ const gitlabApi = axios.create({
 
 const jiraApi = axios.create({
   baseURL: JIRA_BASE_URL,
-  auth: { username: JIRA_EMAIL, password: JIRA_API_TOKEN },
+  auth: { username: JIRA_AI_AGENT_EMAIL, password: JIRA_AI_AGENT_TOKEN },
   headers: { "Content-Type": "application/json" }
 });
 
@@ -107,9 +110,7 @@ Code Changes:
 ${changes.map(c => `File: ${c.new_path}\nDiff:\n${c.diff}`).join("\n\n")}
 
 Task:
-1. Suggest QA test cases that should be verified.
-2. Summarize if story is ready for QA.
-3. Mention any important edge cases QA should check.
+Generate concise QA test cases and summary for QA, suitable to post directly as a Jira comment. Be short, clear, and actionable.
 `;
 
   const response = await model.generateContent(prompt);
@@ -118,42 +119,70 @@ Task:
 
 // ---------------- Jira ADF Builder (bold, bullets, paragraphs) ----------------
 function buildJiraADFFromText(text) {
-  const lines = text.split("\n").filter(l => l.trim() !== "");
+ const lines = text.split("\n");
   const content = [];
+  let currentList = null;
+  let inCodeBlock = false;
+  let codeText = "";
+  let codeLang = "text";
 
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Bold headings (e.g., **1. QA Test Cases**)
-    if (/^\*\*(.+)\*\*$/.test(trimmed)) {
-      const heading = trimmed.replace(/\*\*/g, "");
-      content.push({
-        type: "paragraph",
-        content: [{ type: "text", text: heading, marks: [{ type: "strong" }] }]
+    if (trimmed.startsWith("```")) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        codeText = "";
+        codeLang = trimmed.slice(3) || "text";
+      } else {
+        inCodeBlock = false;
+        content.push({
+          type: "codeBlock",
+          attrs: { language: codeLang },
+          content: [{ type: "text", text: codeText }]
+        });
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeText += line + "\n";
+      continue;
+    }
+
+    if (trimmed.startsWith("•")) {
+      if (!currentList) currentList = { type: "bulletList", content: [] };
+      currentList.content.push({
+        type: "listItem",
+        content: [{ type: "paragraph", content: [{ type: "text", text: trimmed.slice(1).trim() }] }]
       });
-
-    // Bullets (single or nested)
-    } else if (/^(\*{1,3})\s+(.*)/.test(trimmed)) {
-      const match = trimmed.match(/^(\*{1,3})\s+(.*)/);
-      const depth = match[1].length;  // Number of * indicates nesting
-      const bulletText = match[2];
-
-      // Add indentation based on depth (2 spaces per level)
-      const indent = "  ".repeat(depth - 1);
-
-      content.push({
-        type: "paragraph",
-        content: [{ type: "text", text: `${indent}• ${bulletText}` }]
-      });
-
-    // Normal paragraph
     } else {
-      content.push({ type: "paragraph", content: [{ type: "text", text: trimmed }] });
+      if (currentList) {
+        content.push(currentList);
+        currentList = null;
+      }
+      if (trimmed.startsWith("###")) {
+        content.push({
+          type: "heading",
+          attrs: { level: 3 },
+          content: [{ type: "text", text: trimmed.replace(/^###\s*/, "") }]
+        });
+      } else if (trimmed) {
+        const isBold = /^\*\*(.+)\*\*$/.test(trimmed);
+        content.push({
+          type: "paragraph",
+          content: [{ type: "text", text: trimmed.replace(/\*\*/g, ""), marks: isBold ? [{ type: "strong" }] : [] }]
+        });
+      } else {
+        content.push({ type: "paragraph", content: [{ type: "text", text: "" }] });
+      }
     }
   }
 
+  if (currentList) content.push(currentList);
   return { type: "doc", version: 1, content };
 }
+
 
 
 // ---------------- Jira Update ----------------
